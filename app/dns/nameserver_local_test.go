@@ -5,18 +5,19 @@ import (
 	"testing"
 	"time"
 
-	. "v2ray.com/core/app/dns"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/net"
+	. "github.com/v2fly/v2ray-core/v4/app/dns"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/features/dns"
 )
 
 func TestLocalNameServer(t *testing.T) {
 	s := NewLocalNameServer()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
-	ips, err := s.QueryIP(ctx, "google.com", net.IP{}, IPOption{
+	ips, err := s.QueryIP(ctx, "google.com", net.IP{}, dns.IPOption{
 		IPv4Enable: true,
 		IPv6Enable: true,
-	})
+	}, false)
 	cancel()
 	common.Must(err)
 	if len(ips) == 0 {

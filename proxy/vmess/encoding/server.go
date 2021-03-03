@@ -14,16 +14,17 @@ import (
 	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/bitmask"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/crypto"
-	"v2ray.com/core/common/dice"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol"
-	"v2ray.com/core/common/task"
-	"v2ray.com/core/proxy/vmess"
-	vmessaead "v2ray.com/core/proxy/vmess/aead"
+
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/bitmask"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/crypto"
+	"github.com/v2fly/v2ray-core/v4/common/dice"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	"github.com/v2fly/v2ray-core/v4/proxy/vmess"
+	vmessaead "github.com/v2fly/v2ray-core/v4/proxy/vmess/aead"
 )
 
 type sessionID struct {
@@ -118,6 +119,11 @@ func NewServerSession(validator *vmess.TimedUserValidator, sessionHistory *Sessi
 	}
 }
 
+// SetAEADForced sets isAEADForced for a ServerSession.
+func (s *ServerSession) SetAEADForced(isAEADForced bool) {
+	s.isAEADForced = isAEADForced
+}
+
 func parseSecurityType(b byte) protocol.SecurityType {
 	if _, f := protocol.SecurityType_name[int32(b)]; f {
 		st := protocol.SecurityType(b)
@@ -185,10 +191,15 @@ func (s *ServerSession) DecodeRequestHeader(reader io.Reader) (*protocol.Request
 		decryptor = bytes.NewReader(aeadData)
 		s.isAEADRequest = true
 
-	case !s.isAEADForced && errorAEAD == vmessaead.ErrNotFound:
+	case errorAEAD == vmessaead.ErrNotFound:
 		userLegacy, timestamp, valid, userValidationError := s.userValidator.Get(buffer.Bytes())
 		if !valid || userValidationError != nil {
 			return nil, drainConnection(newError("invalid user").Base(userValidationError))
+		}
+		if s.isAEADForced {
+			return nil, drainConnection(newError("invalid user: VMessAEAD is enforced and a non VMessAEAD connection is received. You can still disable this security feature with environment variable v2ray.vmess.aead.forced = false . You will not be able to enable legacy header workaround in the future."))
+		} else {
+			newError("Critical Warning: potentially invalid user: a non VMessAEAD connection is received. From 2022 Jan 1st, this kind of connection will be rejected by default. You should update or replace your client software now. ").AtWarning().WriteToLog()
 		}
 		user = userLegacy
 		iv := hashTimestamp(md5.New(), timestamp)

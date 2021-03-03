@@ -5,8 +5,9 @@ package dns
 import (
 	"context"
 
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/features/dns/localdns"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/features/dns"
+	"github.com/v2fly/v2ray-core/v4/features/dns/localdns"
 )
 
 // LocalNameServer is an wrapper over local DNS feature.
@@ -15,17 +16,9 @@ type LocalNameServer struct {
 }
 
 // QueryIP implements Server.
-func (s *LocalNameServer) QueryIP(ctx context.Context, domain string, clientIP net.IP, option IPOption) ([]net.IP, error) {
-	if option.IPv4Enable && option.IPv6Enable {
-		return s.client.LookupIP(domain)
-	}
-
-	if option.IPv4Enable {
-		return s.client.LookupIPv4(domain)
-	}
-
-	if option.IPv6Enable {
-		return s.client.LookupIPv6(domain)
+func (s *LocalNameServer) QueryIP(_ context.Context, domain string, _ net.IP, option dns.IPOption, _ bool) ([]net.IP, error) {
+	if option.IPv4Enable || option.IPv6Enable {
+		return s.client.LookupIP(domain, option)
 	}
 
 	return nil, newError("neither IPv4 nor IPv6 is enabled")

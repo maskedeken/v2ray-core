@@ -10,16 +10,17 @@ import (
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol/dns"
-	udp_proto "v2ray.com/core/common/protocol/udp"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/signal/pubsub"
-	"v2ray.com/core/common/task"
-	dns_feature "v2ray.com/core/features/dns"
-	"v2ray.com/core/features/routing"
-	"v2ray.com/core/transport/internet/udp"
+
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/protocol/dns"
+	udp_proto "github.com/v2fly/v2ray-core/v4/common/protocol/udp"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/signal/pubsub"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	dns_feature "github.com/v2fly/v2ray-core/v4/features/dns"
+	"github.com/v2fly/v2ray-core/v4/features/routing"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/udp"
 )
 
 // ClassicNameServer implemented traditional UDP DNS.
@@ -54,7 +55,7 @@ func NewClassicNameServer(address net.Destination, dispatcher routing.Dispatcher
 		Execute:  s.Cleanup,
 	}
 	s.udpServer = udp.NewDispatcher(dispatcher, s.HandleResponse)
-	newError("DNS: created UDP client inited for ", address.NetAddr()).AtInfo().WriteToLog()
+	newError("DNS: created UDP client initialized for ", address.NetAddr()).AtInfo().WriteToLog()
 	return s
 }
 
@@ -183,7 +184,7 @@ func (s *ClassicNameServer) addPendingRequest(req *dnsRequest) {
 	s.requests[id] = *req
 }
 
-func (s *ClassicNameServer) sendQuery(ctx context.Context, domain string, clientIP net.IP, option IPOption) {
+func (s *ClassicNameServer) sendQuery(ctx context.Context, domain string, clientIP net.IP, option dns_feature.IPOption) {
 	newError(s.name, " querying DNS for: ", domain).AtDebug().WriteToLog(session.ExportIDToError(ctx))
 
 	reqs := buildReqMsgs(domain, option, s.newReqID, genEDNS0Options(clientIP))
@@ -202,7 +203,7 @@ func (s *ClassicNameServer) sendQuery(ctx context.Context, domain string, client
 	}
 }
 
-func (s *ClassicNameServer) findIPsForDomain(domain string, option IPOption) ([]net.IP, error) {
+func (s *ClassicNameServer) findIPsForDomain(domain string, option dns_feature.IPOption) ([]net.IP, error) {
 	s.RLock()
 	record, found := s.ips[domain]
 	s.RUnlock()
@@ -241,13 +242,17 @@ func (s *ClassicNameServer) findIPsForDomain(domain string, option IPOption) ([]
 }
 
 // QueryIP implements Server.
-func (s *ClassicNameServer) QueryIP(ctx context.Context, domain string, clientIP net.IP, option IPOption) ([]net.IP, error) {
+func (s *ClassicNameServer) QueryIP(ctx context.Context, domain string, clientIP net.IP, option dns_feature.IPOption, disableCache bool) ([]net.IP, error) {
 	fqdn := Fqdn(domain)
 
-	ips, err := s.findIPsForDomain(fqdn, option)
-	if err != errRecordNotFound {
-		newError(s.name, " cache HIT ", domain, " -> ", ips).Base(err).AtDebug().WriteToLog()
-		return ips, err
+	if disableCache {
+		newError("DNS cache is disabled. Querying IP for ", domain, " at ", s.name).AtDebug().WriteToLog()
+	} else {
+		ips, err := s.findIPsForDomain(fqdn, option)
+		if err != errRecordNotFound {
+			newError(s.name, " cache HIT ", domain, " -> ", ips).Base(err).AtDebug().WriteToLog()
+			return ips, err
+		}
 	}
 
 	// ipv4 and ipv6 belong to different subscription groups

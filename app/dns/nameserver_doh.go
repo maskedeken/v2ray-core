@@ -15,15 +15,16 @@ import (
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol/dns"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/signal/pubsub"
-	"v2ray.com/core/common/task"
-	dns_feature "v2ray.com/core/features/dns"
-	"v2ray.com/core/features/routing"
-	"v2ray.com/core/transport/internet"
+
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/protocol/dns"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/signal/pubsub"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	dns_feature "github.com/v2fly/v2ray-core/v4/features/dns"
+	"github.com/v2fly/v2ray-core/v4/features/routing"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
 )
 
 // DoHNameServer implemented DNS over HTTPS (RFC8484) Wire Format,
@@ -206,7 +207,7 @@ func (s *DoHNameServer) newReqID() uint16 {
 	return uint16(atomic.AddUint32(&s.reqID, 1))
 }
 
-func (s *DoHNameServer) sendQuery(ctx context.Context, domain string, clientIP net.IP, option IPOption) {
+func (s *DoHNameServer) sendQuery(ctx context.Context, domain string, clientIP net.IP, option dns_feature.IPOption) {
 	newError(s.name, " querying: ", domain).AtInfo().WriteToLog(session.ExportIDToError(ctx))
 
 	reqs := buildReqMsgs(domain, option, s.newReqID, genEDNS0Options(clientIP))
@@ -285,7 +286,7 @@ func (s *DoHNameServer) dohHTTPSContext(ctx context.Context, b []byte) ([]byte, 
 	return ioutil.ReadAll(resp.Body)
 }
 
-func (s *DoHNameServer) findIPsForDomain(domain string, option IPOption) ([]net.IP, error) {
+func (s *DoHNameServer) findIPsForDomain(domain string, option dns_feature.IPOption) ([]net.IP, error) {
 	s.RLock()
 	record, found := s.ips[domain]
 	s.RUnlock()
@@ -328,13 +329,17 @@ func (s *DoHNameServer) findIPsForDomain(domain string, option IPOption) ([]net.
 }
 
 // QueryIP implements Server.
-func (s *DoHNameServer) QueryIP(ctx context.Context, domain string, clientIP net.IP, option IPOption) ([]net.IP, error) { // nolint: dupl
+func (s *DoHNameServer) QueryIP(ctx context.Context, domain string, clientIP net.IP, option dns_feature.IPOption, disableCache bool) ([]net.IP, error) { // nolint: dupl
 	fqdn := Fqdn(domain)
 
-	ips, err := s.findIPsForDomain(fqdn, option)
-	if err != errRecordNotFound {
-		newError(s.name, " cache HIT ", domain, " -> ", ips).Base(err).AtDebug().WriteToLog()
-		return ips, err
+	if disableCache {
+		newError("DNS cache is disabled. Querying IP for ", domain, " at ", s.name).AtDebug().WriteToLog()
+	} else {
+		ips, err := s.findIPsForDomain(fqdn, option)
+		if err != errRecordNotFound {
+			newError(s.name, " cache HIT ", domain, " -> ", ips).Base(err).AtDebug().WriteToLog()
+			return ips, err
+		}
 	}
 
 	// ipv4 and ipv6 belong to different subscription groups

@@ -3,30 +3,32 @@
 // Package dns is an implementation of core.DNS feature.
 package dns
 
-//go:generate go run v2ray.com/core/common/errors/errorgen
+//go:generate go run github.com/v2fly/v2ray-core/v4/common/errors/errorgen
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
-	"v2ray.com/core/app/router"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/errors"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/strmatcher"
-	"v2ray.com/core/features"
-	"v2ray.com/core/features/dns"
+	"github.com/v2fly/v2ray-core/v4/app/router"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/errors"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/strmatcher"
+	"github.com/v2fly/v2ray-core/v4/features"
+	"github.com/v2fly/v2ray-core/v4/features/dns"
 )
 
 // DNS is a DNS rely server.
 type DNS struct {
 	sync.Mutex
-	tag     string
-	hosts   *StaticHosts
-	clients []*Client
-
+	tag           string
+	disableCache  bool
+	hosts         *StaticHosts
+	clients       []*Client
+	ctx           context.Context
 	domainMatcher strmatcher.IndexMatcher
 	matcherInfos  []DomainMatcherInfo
 }
@@ -105,6 +107,7 @@ func New(ctx context.Context, config *Config) (*DNS, error) {
 		clients = append(clients, client)
 	}
 
+	// If there is no DNS client in config, add a `localhost` DNS client
 	if len(clients) == 0 {
 		clients = append(clients, NewLocalDNSClient())
 	}
@@ -113,8 +116,10 @@ func New(ctx context.Context, config *Config) (*DNS, error) {
 		tag:           tag,
 		hosts:         hosts,
 		clients:       clients,
+		ctx:           ctx,
 		domainMatcher: domainMatcher,
 		matcherInfos:  matcherInfos,
+		disableCache:  config.DisableCache,
 	}, nil
 }
 
@@ -140,36 +145,13 @@ func (s *DNS) IsOwnLink(ctx context.Context) bool {
 }
 
 // LookupIP implements dns.Client.
-func (s *DNS) LookupIP(domain string) ([]net.IP, error) {
-	return s.lookupIPInternal(domain, IPOption{
-		IPv4Enable: true,
-		IPv6Enable: true,
-	})
-}
-
-// LookupIPv4 implements dns.IPv4Lookup.
-func (s *DNS) LookupIPv4(domain string) ([]net.IP, error) {
-	return s.lookupIPInternal(domain, IPOption{
-		IPv4Enable: true,
-		IPv6Enable: false,
-	})
-}
-
-// LookupIPv6 implements dns.IPv6Lookup.
-func (s *DNS) LookupIPv6(domain string) ([]net.IP, error) {
-	return s.lookupIPInternal(domain, IPOption{
-		IPv4Enable: false,
-		IPv6Enable: true,
-	})
-}
-
-func (s *DNS) lookupIPInternal(domain string, option IPOption) ([]net.IP, error) {
+func (s *DNS) LookupIP(domain string, option dns.IPOption) ([]net.IP, error) {
 	if domain == "" {
 		return nil, newError("empty domain name")
 	}
 
 	// Normalize the FQDN form query
-	if domain[len(domain)-1] == '.' {
+	if strings.HasSuffix(domain, ".") {
 		domain = domain[:len(domain)-1]
 	}
 
@@ -189,9 +171,13 @@ func (s *DNS) lookupIPInternal(domain string, option IPOption) ([]net.IP, error)
 
 	// Name servers lookup
 	errs := []error{}
-	ctx := session.ContextWithInbound(context.Background(), &session.Inbound{Tag: s.tag})
+	ctx := session.ContextWithInbound(s.ctx, &session.Inbound{Tag: s.tag})
 	for _, client := range s.sortClients(domain) {
-		ips, err := client.QueryIP(ctx, domain, option)
+		if !option.FakeEnable && strings.EqualFold(client.Name(), "FakeDNS") {
+			newError("skip DNS resolution for domain ", domain, " at server ", client.Name()).AtDebug().WriteToLog()
+			continue
+		}
+		ips, err := client.QueryIP(ctx, domain, option, s.disableCache)
 		if len(ips) > 0 {
 			return ips, nil
 		}
